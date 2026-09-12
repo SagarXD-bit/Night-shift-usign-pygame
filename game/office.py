@@ -11,11 +11,12 @@ from settings import (
 class Interactable:
     """Something the player can inspect with E. Does not block movement."""
 
-    def __init__(self, name, rect, description, color):
+    def __init__(self, name, rect, description, color, prompt=None):
         self.name = name
         self.rect = pygame.Rect(rect)
         self.description = description
         self.color = color
+        self.prompt = prompt or f"Inspect {name}"
 
     def draw(self, surface, font, highlighted=False):
         pygame.draw.rect(surface, self.color, self.rect)
@@ -58,9 +59,9 @@ class Office:
         self.interactables = [
             Interactable(
                 "Computer", (372, 100, 56, 36),
-                "The security computer hums quietly. A sticky note on the "
-                "monitor reads: 'Cameras arrive Thursday. Don't stay past 6.'",
+                "The security computer hums quietly.",  # unused: E opens the CCTV
                 (62, 76, 92),
+                prompt="Use Computer (security cameras)",
             ),
             Interactable(
                 "Wall Clock", (470, 22, 34, 30),

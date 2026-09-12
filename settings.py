@@ -26,6 +26,19 @@ PLAYER_OUTLINE = (90, 92, 108)
 INTERACT_RANGE = 60      # pixels between player centre and an object's edge
 MESSAGE_DURATION = 5.0   # seconds an interaction message stays on screen
 
+# --- Power system (all rates are % per second) ---
+POWER_MAX = 100.0
+POWER_BASE_DRAIN = 0.15    # always: normal office operation
+POWER_CAMERA_DRAIN = 0.30  # extra while the CCTV is open
+POWER_LOW = 25             # HUD warning colour below this
+
+# --- Darkness overlay around the player (radius, alpha), drawn big -> small ---
+DARKNESS_ALPHA = 205
+LIGHT_STEPS = ((240, 170), (200, 120), (160, 60), (120, 0))
+# When the power dies the office goes almost pitch black.
+BLACKOUT_ALPHA = 235
+BLACKOUT_LIGHT_STEPS = ((60, 150), (36, 0))
+
 # --- Colours ---
 COLOR_BG = (6, 6, 10)
 COLOR_FLOOR = (21, 21, 29)
@@ -39,7 +52,3 @@ COLOR_TEXT_DIM = (118, 118, 134)
 COLOR_ACCENT = (150, 170, 205)
 COLOR_PANEL = (12, 12, 18)
 COLOR_DANGER = (170, 60, 55)
-
-# --- Darkness overlay around the player (radius, alpha), drawn big -> small ---
-DARKNESS_ALPHA = 205
-LIGHT_STEPS = ((240, 170), (200, 120), (160, 60), (120, 0))

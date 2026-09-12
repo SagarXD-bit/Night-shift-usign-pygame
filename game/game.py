@@ -4,13 +4,16 @@ from settings import (
     SCREEN_WIDTH, SCREEN_HEIGHT, FPS, TITLE,
     SECONDS_PER_GAME_HOUR, GAME_HOUR_OPTIONS,
     INTERACT_RANGE, MESSAGE_DURATION,
+    POWER_MAX, POWER_LOW,
     COLOR_BG, COLOR_TEXT, COLOR_TEXT_DIM, COLOR_ACCENT,
     COLOR_PANEL, COLOR_DANGER,
-    DARKNESS_ALPHA, LIGHT_STEPS,
+    DARKNESS_ALPHA, LIGHT_STEPS, BLACKOUT_ALPHA, BLACKOUT_LIGHT_STEPS,
 )
+from game.cameras import CameraSystem
 from game.clock import GameClock
 from game.office import Office
 from game.player import Player
+from game.power import PowerSystem
 
 
 class Game:
@@ -42,6 +45,8 @@ class Game:
         self.seconds_per_hour = SECONDS_PER_GAME_HOUR
 
         self.office = Office()
+        self.cameras = CameraSystem()
+        self.power = PowerSystem()
         self.player = None
         self.game_clock = None
 
@@ -73,9 +78,17 @@ class Game:
     def _update(self, dt):
         if self.state != self.STATE_PLAYING:
             return
-        keys = pygame.key.get_pressed()
-        self.player.update(dt, keys, self.office.walls)
+        if self.cameras.is_open:
+            # Time keeps passing while the player watches the monitors.
+            self.cameras.update(dt)
+        else:
+            keys = pygame.key.get_pressed()
+            self.player.update(dt, keys, self.office.walls)
         self.game_clock.update(dt)
+        had_power = self.power.has_power
+        self.power.update(dt, self.cameras.is_open)
+        if had_power and not self.power.has_power:
+            self._on_blackout()
         if self.message_timer > 0:
             self.message_timer -= dt
             if self.message_timer <= 0:
@@ -141,6 +154,9 @@ class Game:
             self.state = self.previous_state
 
     def _key_playing(self, key):
+        if self.cameras.is_open:
+            self.cameras.handle_key(key)  # ESC/E closes the CCTV first
+            return
         if key == pygame.K_ESCAPE:
             self.state = self.STATE_PAUSED
         elif key == pygame.K_e:
@@ -192,6 +208,8 @@ class Game:
     def start_night(self):
         self.player = Player(400, 330)
         self.game_clock = GameClock(self.seconds_per_hour)
+        self.power = PowerSystem()
+        self.cameras.close()
         self.message = ""
         self.message_timer = 0.0
         self.pause_index = 0
@@ -202,6 +220,12 @@ class Game:
         self.death_cause = cause
         self.state = self.STATE_GAME_OVER
 
+    def _on_blackout(self):
+        self.cameras.close()
+        self._show_message(
+            "The power dies. Somewhere in the walls, the building groans."
+        )
+
     def _show_message(self, text):
         self.message = text
         self.message_timer = MESSAGE_DURATION
@@ -210,7 +234,12 @@ class Game:
         near = self._nearest_interactable()
         if near is None:
             return
-        if near.name == "Wall Clock":
+        if near.name == "Computer":
+            if self.power.has_power:
+                self.cameras.open()
+            else:
+                self._show_message("The computer is dead. The building has no power.")
+        elif near.name == "Wall Clock":
             self._show_message(
                 f"The clock reads {self.game_clock.display}. Sunrise at 6 AM. "
                 "The second hand ticks a little too loudly."
@@ -255,13 +284,24 @@ class Game:
         self.player.draw(self.screen)
         self._draw_darkness()
         self._draw_hud()
+        if self.cameras.is_open:
+            # The CCTV feed covers the whole screen: a different machine.
+            self.cameras.draw(self.screen, self.font_sm, self.font_md,
+                              self.game_clock.display)
 
     def _draw_darkness(self):
-        """Soft pool of light around the player; the rest of the office is dim."""
+        """Soft pool of light around the player; the rest of the office is dim.
+
+        With no power the pool shrinks to almost nothing.
+        """
+        if self.power.has_power:
+            alpha, steps = DARKNESS_ALPHA, LIGHT_STEPS
+        else:
+            alpha, steps = BLACKOUT_ALPHA, BLACKOUT_LIGHT_STEPS
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, DARKNESS_ALPHA))
+        overlay.fill((0, 0, 0, alpha))
         px, py = self.player.rect.center
-        for radius, alpha in LIGHT_STEPS:
+        for radius, alpha in steps:
             pygame.draw.circle(overlay, (0, 0, 0, alpha), (px, py), radius)
         self.screen.blit(overlay, (0, 0))
 
@@ -271,12 +311,23 @@ class Game:
         clock_label = self.font_lg.render(self.game_clock.display, True, COLOR_TEXT)
         self.screen.blit(clock_label, (SCREEN_WIDTH - clock_label.get_width() - 26, 22))
 
+        # Power readout + bar; red when running low.
+        low = self.power.percent < POWER_LOW
+        power_color = COLOR_DANGER if low else COLOR_TEXT
+        power_label = self.font_sm.render(f"POWER: {self.power.percent}%", True, power_color)
+        self.screen.blit(power_label, (26, 46))
+        bar = pygame.Rect(26, 66, 80, 5)
+        pygame.draw.rect(self.screen, (50, 50, 64), bar)
+        fill = round(bar.width * self.power.level / POWER_MAX)
+        if fill > 0:
+            pygame.draw.rect(self.screen, power_color, (bar.x, bar.y, fill, bar.height))
+
         if self.message:
             self._draw_message_box(self.message, COLOR_TEXT)
         else:
             near = self._nearest_interactable()
             if near:
-                self._draw_message_box(f"[E]  Inspect {near.name}", COLOR_ACCENT)
+                self._draw_message_box(f"[E]  {near.prompt}", COLOR_ACCENT)
 
     def _draw_message_box(self, text, color):
         lines = self._wrap(text, self.font_sm, SCREEN_WIDTH - 220)
@@ -323,7 +374,7 @@ class Game:
                 color = COLOR_ACCENT if i == self.menu_index else COLOR_TEXT
             prefix = "> " if i == self.menu_index and enabled else "   "
             self._centered(prefix + label, 300 + i * 40, self.font_md, color)
-        self._centered("v0.1", SCREEN_HEIGHT - 36, self.font_sm, COLOR_TEXT_DIM)
+        self._centered("v0.3", SCREEN_HEIGHT - 36, self.font_sm, COLOR_TEXT_DIM)
 
     def _draw_settings(self):
         self._centered("SETTINGS", 140, self.font_lg, COLOR_TEXT)
